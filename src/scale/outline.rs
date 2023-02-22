@@ -196,7 +196,7 @@ impl<'a> LayerMut<'a> {
     pub fn embolden(&mut self, x_strength: f32, y_strength: f32) {
         let mut point_start = 0;
         let mut pos = 0;
-        let winding = compute_winding(self.points);
+        let winding = compute_winding(&mut self.path().commands());
         for verb in self.verbs {
             match verb {
                 Verb::MoveTo | Verb::Close => {
@@ -381,20 +381,47 @@ fn embolden(points: &mut [Point], winding: u8, x_strength: f32, y_strength: f32)
     }
 }
 
-fn compute_winding(points: &[Point]) -> u8 {
-    if points.is_empty() {
-        return 0;
-    }
-    let mut area = 0.;
-    let last = points.len() - 1;
-    let mut prev = points[last];
-    for cur in points[0..=last].iter() {
-        area += (cur.y - prev.y) * (cur.x + prev.x);
-        prev = *cur;
-    }
-    if area > 0. {
-        1
+fn compute_winding<Iter>(path: &mut Iter) -> u8
+where
+    Iter: Iterator<Item = zeno::Command>,
+{
+    use zeno::Command::*;
+    let first = if let Some(MoveTo(at)) = path.next() {
+        at
     } else {
-        0
+        return 0;
+    };
+    let mut area = 0.0;
+    let mut v0: zeno::Vector = (0.0, 0.0).into();
+
+    for evt in path {
+        match evt {
+            MoveTo(_) => {
+                return 0;
+            }
+            Close => {
+                return if area > 0.0 { 1 } else { 0 };
+            }
+            LineTo(to) => {
+                let v1 = to - first;
+                area += v0.cross(v1);
+                v0 = v1;
+            }
+            QuadTo(ctrl, to) => {
+                let v1 = ctrl - first;
+                let v2 = to - first;
+                area += v0.cross(v1) + v1.cross(v2);
+                v0 = v2;
+            }
+            CurveTo(ctrl1, ctrl2, to) => {
+                let v1 = ctrl1 - first;
+                let v2 = ctrl2 - first;
+                let v3 = to - first;
+                area += v0.cross(v1) + v1.cross(v2) + v2.cross(v3);
+                v0 = v3;
+            }
+        };
     }
+
+    0
 }
